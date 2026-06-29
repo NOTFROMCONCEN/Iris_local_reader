@@ -40,13 +40,25 @@ npx
 F:\A_Projects_pack_Classified\08_自编写MCP\Local_Reader
 ```
 
-如果你的 MCP 客户端支持环境变量，填：
+程序会自动读取工作目录下的 `.env`，所以可以直接在这里填 vault 路径：
+
+```text
+F:\A_Projects_pack_Classified\08_自编写MCP\Local_Reader\.env
+```
 
 ```text
 OBSIDIAN_VAULT_PATH=F:\Path\To\Your\ObsidianVault
 ```
 
-如果界面没有环境变量输入框，可以改用 PowerShell 注入环境变量：
+如果你的 MCP 客户端支持环境变量，也可以直接在客户端里填：
+
+```text
+OBSIDIAN_VAULT_PATH=F:\Path\To\Your\ObsidianVault
+```
+
+客户端传入的环境变量优先级高于 `.env`。
+
+如果某个客户端不能正确使用 `npx`，可以改用 PowerShell 注入环境变量：
 
 **命令**
 
