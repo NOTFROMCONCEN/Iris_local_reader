@@ -1,0 +1,150 @@
+{
+    "_comment": "Obsidian Reader MCP — 各客户端配置示例。所有示例默认使用 npx 本地源码目录调用方式（最稳定，无需 .tgz）。请按你的客户端选择对应片段。",
+    "_variables": {
+        "VAULT": "F:\\Path\\To\\Your\\ObsidianVault",
+        "PROJECT_ROOT": "F:\\Path\\To\\Local_Reader",
+        "_note": "JSON 中 Windows 反斜杠必须写成双反斜杠 \\\\，如下面示例所示。"
+    },
+    "claude_desktop": {
+        "_path_windows": "%APPDATA%\\Claude\\claude_desktop_config.json",
+        "_path_mac": "~/Library/Application Support/Claude/claude_desktop_config.json",
+        "mcpServers": {
+            "obsidian-reader": {
+                "command": "npx",
+                "args": [
+                    "--yes",
+                    "--package=.",
+                    "--",
+                    "obsidian-reader-mcp",
+                    "--vault",
+                    "F:\\Path\\To\\Your\\ObsidianVault"
+                ],
+                "cwd": "F:\\Path\\To\\Local_Reader"
+            }
+        }
+    },
+    "cursor_global": {
+        "_path_windows": "%USERPROFILE%\\.cursor\\mcp.json",
+        "_path_mac": "~/.cursor/mcp.json",
+        "mcpServers": {
+            "obsidian-reader": {
+                "command": "npx",
+                "args": [
+                    "--yes",
+                    "--package=.",
+                    "--",
+                    "obsidian-reader-mcp",
+                    "--vault",
+                    "F:\\Path\\To\\Your\\ObsidianVault"
+                ],
+                "cwd": "F:\\Path\\To\\Local_Reader"
+            }
+        }
+    },
+    "cursor_project": {
+        "_path": "<项目根>/.cursor/mcp.json （随项目走，团队共享）",
+        "mcpServers": {
+            "obsidian-reader": {
+                "command": "npx",
+                "args": [
+                    "--yes",
+                    "--package=.",
+                    "--",
+                    "obsidian-reader-mcp",
+                    "--vault",
+                    "F:\\Path\\To\\Your\\ObsidianVault"
+                ],
+                "cwd": "${workspaceFolder}"
+            }
+        }
+    },
+    "cline_vscode": {
+        "_path_windows": "%APPDATA%\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\settings\\cline_mcp_settings.json",
+        "_path_mac": "~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json",
+        "mcpServers": {
+            "obsidian-reader": {
+                "command": "npx",
+                "args": [
+                    "--yes",
+                    "--package=.",
+                    "--",
+                    "obsidian-reader-mcp",
+                    "--vault",
+                    "F:\\Path\\To\\Your\\ObsidianVault"
+                ],
+                "cwd": "F:\\Path\\To\\Local_Reader",
+                "disabled": false,
+                "alwaysAllow": []
+            }
+        }
+    },
+    "vscode_mcp_extension": {
+        "_comment": "VSCode 原生 MCP 支持（settings.json 中的 mcp.servers），或 .vscode/mcp.json",
+        "mcp": {
+            "servers": {
+                "obsidian-reader": {
+                    "type": "stdio",
+                    "command": "npx",
+                    "args": [
+                        "--yes",
+                        "--package=.",
+                        "--",
+                        "obsidian-reader-mcp",
+                        "--vault",
+                        "F:\\Path\\To\\Your\\ObsidianVault"
+                    ],
+                    "cwd": "F:\\Path\\To\\Local_Reader"
+                }
+            }
+        }
+    },
+    "windsurf": {
+        "_path": "~/.codeium/windsurf/mcp_config.json",
+        "mcpServers": {
+            "obsidian-reader": {
+                "command": "npx",
+                "args": [
+                    "--yes",
+                    "--package=.",
+                    "--",
+                    "obsidian-reader-mcp",
+                    "--vault",
+                    "F:\\Path\\To\\Your\\ObsidianVault"
+                ],
+                "cwd": "F:\\Path\\To\\Local_Reader"
+            }
+        }
+    },
+    "cline_env_variant": {
+        "_comment": "兼容兜底：部分 Windows 客户端对 npx 的 --package=. 解析不佳时，改用 PowerShell 注入环境变量 + npx 本地目录。command 用 pwsh。",
+        "mcpServers": {
+            "obsidian-reader": {
+                "command": "pwsh",
+                "args": [
+                    "-NoProfile",
+                    "-Command",
+                    "$env:OBSIDIAN_VAULT_PATH='F:\\Path\\To\\Your\\ObsidianVault'; npx --yes --package F:\\Path\\To\\Local_Reader obsidian-reader-mcp"
+                ],
+                "cwd": "F:\\Path\\To\\Local_Reader"
+            }
+        }
+    },
+    "tarball_variant": {
+        "_comment": "固定版本分发方式：先用 npm pack 生成 tgz，再指向它。适合离线/版本锁定场景。",
+        "_prerequisite": "先在项目根执行 npm pack 生成 obsidian-reader-mcp-0.1.1.tgz",
+        "mcpServers": {
+            "obsidian-reader": {
+                "command": "npx",
+                "args": [
+                    "--yes",
+                    "--package=F:\\Path\\To\\Local_Reader\\obsidian-reader-mcp-0.1.1.tgz",
+                    "--",
+                    "obsidian-reader-mcp",
+                    "--vault",
+                    "F:\\Path\\To\\Your\\ObsidianVault"
+                ],
+                "cwd": "F:\\Path\\To\\Local_Reader"
+            }
+        }
+    }
+}

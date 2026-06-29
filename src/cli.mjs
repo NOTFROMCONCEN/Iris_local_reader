@@ -18,24 +18,80 @@ function findProjectRoot(startDir) {
 
 const cliDir = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = findProjectRoot(cliDir);
-function getLogPaths() {
-  const paths = [
-    process.env.OBSIDIAN_READER_LOG_PATH,
-    path.join(process.cwd(), "logs", "kelivo-startup.log"),
-    path.join(projectRoot, "logs", "kelivo-startup.log"),
-  ].filter(Boolean);
-  return [...new Set(paths.map((item) => path.resolve(item)))];
+
+function readPackageVersion() {
+  // Best-effort version read. Falls back to "unknown" so --version never
+  // crashes the CLI when package.json is unreachable (e.g. bundled contexts).
+  try {
+    const pkgPath = path.join(projectRoot, "package.json");
+    if (fs.existsSync(pkgPath)) {
+      return JSON.parse(fs.readFileSync(pkgPath, "utf8")).version ?? "unknown";
+    }
+  } catch {
+    // ignore
+  }
+  return "unknown";
+}
+
+const PKG_VERSION = readPackageVersion();
+
+const HELP_TEXT = `obsidian-reader-mcp v${PKG_VERSION}
+
+Read-only MCP server for local Obsidian vaults.
+
+Usage:
+  obsidian-reader-mcp --vault <vault-path> [options]
+  obsidian-reader-mcp --version
+  obsidian-reader-mcp --help
+
+Options:
+  --vault, --vault-path <path>   Path to the Obsidian vault (required).
+                                 Can also be set via OBSIDIAN_VAULT_PATH env
+                                 or a .env file in the working directory.
+  --include-dot-obsidian         Allow reading the .obsidian config folder.
+  --max-file-bytes <n>           Max bytes per file read (default 1048576).
+  --version                      Print version and exit.
+  --help, -h                     Show this help and exit.
+
+The server speaks MCP over stdio. It is normally launched by an MCP client
+(Claude Desktop, Cursor, etc.) via npx, not run manually.`;
+
+/**
+ * Resolve a single authoritative startup log path.
+ *
+ * Previously this wrote to BOTH `cwd/logs` and `projectRoot/logs`, which meant
+ * that two different processes (e.g. a client capability probe with a temp cwd
+ * and the real npx launch with projectRoot == npx cache) could each write a
+ * `starting` line into the same `projectRoot/logs` file, producing confusing
+ * "duplicate startup" logs. We now pick exactly one location:
+ *
+ *   1. OBSIDIAN_READER_LOG_PATH (explicit override), else
+ *   2. projectRoot/logs/kelivo-startup.log (stable regardless of cwd).
+ *
+ * Returns null if resolution fails so logging never breaks startup.
+ */
+function getLogPath() {
+  const candidate = process.env.OBSIDIAN_READER_LOG_PATH
+    || path.join(projectRoot, "logs", "kelivo-startup.log");
+  try {
+    return path.resolve(candidate);
+  } catch {
+    return null;
+  }
 }
 
 function logStartup(message, details = undefined) {
-  const line = `[${new Date().toISOString()}] ${message}${details ? ` ${JSON.stringify(details)}` : ""}\n`;
-  for (const logPath of getLogPaths()) {
-    try {
-      fs.mkdirSync(path.dirname(logPath), { recursive: true });
-      fs.appendFileSync(logPath, line, "utf8");
-    } catch {
-      // Never let diagnostics break stdio startup.
-    }
+  const logPath = getLogPath();
+  if (!logPath) return;
+  // Always tag the line with pid + a short launch-id so multi-process entries
+  // (probe vs real launch) can be told apart in the same file.
+  const payload = { pid: process.pid, ...(details || {}) };
+  const line = `[${new Date().toISOString()}] ${message}${JSON.stringify(payload)}\n`;
+  try {
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(logPath, line, "utf8");
+  } catch {
+    // Never let diagnostics break stdio startup.
   }
 }
 
@@ -100,7 +156,20 @@ function applyCliArgs(args) {
   }
 }
 
-applyCliArgs(process.argv.slice(2));
+const cliArgs = process.argv.slice(2);
+
+// Handle --help / --version before anything else so users can verify an npx
+// install succeeded without needing a configured vault.
+if (cliArgs.includes("--help") || cliArgs.includes("-h")) {
+  process.stdout.write(`${HELP_TEXT}\n`);
+  process.exit(0);
+}
+if (cliArgs.includes("--version") || cliArgs.includes("-v")) {
+  process.stdout.write(`${PKG_VERSION}\n`);
+  process.exit(0);
+}
+
+applyCliArgs(cliArgs);
 
 logStartup("starting", {
   argv: process.argv.slice(2),
@@ -112,10 +181,23 @@ logStartup("starting", {
 });
 
 main().catch((error) => {
+  const message = error instanceof Error ? error.message : String(error);
   logStartup("failed", {
-    message: error instanceof Error ? error.message : String(error),
+    message,
     stack: error instanceof Error ? error.stack : null,
   });
-  console.error(error instanceof Error ? error.message : String(error));
+
+  // Friendly guidance when the vault path is missing — the most common npx
+  // startup failure for new users.
+  if (message.includes("OBSIDIAN_VAULT_PATH is required")) {
+    process.stderr.write(
+      `${message}\n\nProvide the vault via one of:\n` +
+      `  --vault <path>            e.g. obsidian-reader-mcp --vault "C:\\MyVault"\n` +
+      `  OBSIDIAN_VAULT_PATH env   e.g. $env:OBSIDIAN_VAULT_PATH="C:\\MyVault"\n` +
+      `  .env file                 OBSIDIAN_VAULT_PATH=... in the working dir\n`,
+    );
+  } else {
+    process.stderr.write(`${message}\n`);
+  }
   process.exit(1);
 });

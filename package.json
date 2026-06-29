@@ -3,17 +3,26 @@
   "version": "0.1.1",
   "description": "Read-only MCP server for local Obsidian vaults.",
   "type": "module",
+  "license": "MIT",
   "bin": {
     "obsidian-reader-mcp": "./src/cli.mjs"
   },
+  "files": [
+    "src/cli.mjs",
+    "src/node-server.mjs",
+    "README.md"
+  ],
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "start": "node src/cli.mjs",
+    "prepublishOnly": "node --test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.21.1",
+    "yaml": "^2.9.0",
     "zod": "^3.25.76"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20.11"
   }
 }

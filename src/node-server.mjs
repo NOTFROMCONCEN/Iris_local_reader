@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import YAML from "yaml";
 
 const TEXT_EXTENSIONS = new Set([
   ".md",
@@ -18,7 +20,11 @@ const TEXT_EXTENSIONS = new Set([
 ]);
 
 const WIKILINK_RE = /!\[\[([^\]]+)\]\]|\[\[([^\]]+)\]\]/g;
-const MARKDOWN_LINK_RE = /!?\[[^\]]*\]\(([^)]+)\)/g;
+// Match markdown links `[text](target)`. The target group allows one level of
+// nested parentheses, e.g. `[x](path(1).md)`, which the old `[^)]+` pattern
+// truncated at the first `)`. Inner chars use `[^()]` (not `[^)]`) so the
+// outer closing paren is unambiguous.
+const MARKDOWN_LINK_RE = /!?\[[^\]]*\]\(([^()]*(?:\([^()]*\)[^()]*)*)\)/g;
 const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/gm;
 const FRONTMATTER_RE = /^---\s*\n([\s\S]*?)\n---\s*(?:\n|$)/;
 
@@ -27,7 +33,26 @@ function parseBool(value, defaultValue = false) {
   return ["1", "true", "yes", "y", "on"].includes(String(value).trim().toLowerCase());
 }
 
-export function loadSettings(env = process.env) {
+/**
+ * Cached settings. The vault path / env knobs rarely change during a process
+ * lifetime, so we compute them once and reuse across every tool call instead
+ * of re-stat-ing the vault directory on each invocation.
+ */
+let cachedSettings = null;
+let cachedSettingsKey = "";
+
+function settingsCacheKey(env = process.env) {
+  return [
+    env.OBSIDIAN_VAULT_PATH ?? "",
+    env.OBSIDIAN_READER_INCLUDE_DOT_OBSIDIAN ?? "",
+    env.OBSIDIAN_READER_MAX_FILE_BYTES ?? "",
+  ].join("\u0000");
+}
+
+export function loadSettings(env = process.env, { force = false } = {}) {
+  const key = settingsCacheKey(env);
+  if (!force && cachedSettings && cachedSettingsKey === key) return cachedSettings;
+
   const rawVault = env.OBSIDIAN_VAULT_PATH;
   if (!rawVault) {
     throw new Error("OBSIDIAN_VAULT_PATH is required.");
@@ -39,11 +64,22 @@ export function loadSettings(env = process.env) {
     throw new Error(`OBSIDIAN_VAULT_PATH is not a directory: ${vaultPath}`);
   }
 
-  return {
+  cachedSettings = {
     vaultPath,
     includeDotObsidian: parseBool(env.OBSIDIAN_READER_INCLUDE_DOT_OBSIDIAN),
     maxFileBytes: Number.parseInt(env.OBSIDIAN_READER_MAX_FILE_BYTES ?? "1048576", 10),
   };
+  cachedSettingsKey = key;
+  return cachedSettings;
+}
+
+/**
+ * Reset the settings cache. Exposed primarily for tests so they can swap the
+ * vault path between cases without leaking the previous process settings.
+ */
+export function resetSettingsCache() {
+  cachedSettings = null;
+  cachedSettingsKey = "";
 }
 
 export function safeRelativePath(settings, relativePath = "") {
@@ -95,6 +131,19 @@ function readText(settings, targetPath) {
   return fs.readFileSync(targetPath, "utf8").replace(/^\uFEFF/, "");
 }
 
+/**
+ * In-memory index: maps absolute file path -> file text content.
+ *
+ * `search_notes` and `find_backlinks` previously walked the whole vault and
+ * read every file from disk on EACH call. With a few hundred notes that is
+ * already sluggish; with thousands it blocks the MCP transport for seconds.
+ *
+ * We build the index once at startup (async, see `rebuildIndex`) and reuse it
+ * for subsequent queries. The index is keyed by vault path so swapping vaults
+ * (e.g. in tests) does not return stale entries.
+ */
+const indexByVault = new Map();
+
 function* walkTextFiles(settings, root = settings.vaultPath) {
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     const fullPath = path.join(root, entry.name);
@@ -107,10 +156,116 @@ function* walkTextFiles(settings, root = settings.vaultPath) {
   }
 }
 
+/** Async directory walk used when (re)building the index without blocking. */
+async function* walkTextFilesAsync(settings, root = settings.vaultPath) {
+  let entries;
+  try {
+    entries = await fsp.readdir(root, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const fullPath = path.join(root, entry.name);
+    if (!isVisible(settings, fullPath)) continue;
+    if (entry.isDirectory()) {
+      yield* walkTextFilesAsync(settings, fullPath);
+    } else if (entry.isFile() && TEXT_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+      yield fullPath;
+    }
+  }
+}
+
+/**
+ * Build (or rebuild) the text index for the given settings using async I/O so
+ * the MCP event loop stays responsive while the vault is being scanned.
+ *
+ * Files that fail to read (encoding, oversized, etc.) are skipped silently —
+ * they are also skipped by the tool implementations, so this stays consistent.
+ */
+export async function rebuildIndex(settings = loadSettings()) {
+  const entries = new Map();
+  for await (const targetPath of walkTextFilesAsync(settings)) {
+    try {
+      const stat = await fsp.stat(targetPath);
+      if (stat.size > settings.maxFileBytes) continue;
+      const raw = await fsp.readFile(targetPath, "utf8");
+      entries.set(targetPath, raw.replace(/^\uFEFF/, ""));
+    } catch {
+      // Skip unreadable files — same behavior as the per-call readers.
+    }
+  }
+  indexByVault.set(settings.vaultPath, entries);
+  return entries;
+}
+
+/**
+ * Return the cached index for the active vault, lazily building it on first
+ * access (synchronous fallback for tests / direct tool calls that bypass
+ * `main()`). Hot-path callers should prefer `rebuildIndex()` at startup.
+ */
+function getIndex(settings) {
+  let entries = indexByVault.get(settings.vaultPath);
+  if (entries) return entries;
+  // Synchronous lazy build so direct calls (tests, ad-hoc CLI use) still work.
+  entries = new Map();
+  for (const targetPath of walkTextFiles(settings)) {
+    try {
+      entries.set(targetPath, readText(settings, targetPath));
+    } catch {
+      // Skip unreadable files — same behavior as the per-call readers.
+    }
+  }
+  indexByVault.set(settings.vaultPath, entries);
+  return entries;
+}
+
+/**
+ * Parse YAML frontmatter.
+ *
+ * Uses the `yaml` package so lists, multi-line strings, quotes and nested
+ * mappings are handled correctly (the old line-split parser only supported
+ * flat `key: value`). If YAML parsing fails for any reason we fall back to a
+ * best-effort flat string map so a malformed block never breaks the tool.
+ *
+ * Values are normalized to JSON-serializable scalars/arrays: non-string YAML
+ * scalars (numbers, booleans, dates) are stringified to keep the tool output
+ * stable and consistent with the previous string-only contract.
+ */
+function toStableFrontmatter(raw) {
+  const metadata = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (value == null) {
+      metadata[key] = "";
+    } else if (Array.isArray(value)) {
+      metadata[key] = value.map((item) => (typeof item === "string" ? item : String(item)));
+    } else if (typeof value === "object") {
+      // Nested mappings/objects: stringify to keep the flat contract stable.
+      try {
+        metadata[key] = JSON.stringify(value);
+      } catch {
+        metadata[key] = String(value);
+      }
+    } else {
+      metadata[key] = typeof value === "string" ? value : String(value);
+    }
+  }
+  return metadata;
+}
+
 export function extractFrontmatter(text) {
   const match = FRONTMATTER_RE.exec(text);
   if (!match) return {};
 
+  try {
+    const parsed = YAML.parse(match[1]);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return toStableFrontmatter(parsed);
+    }
+  } catch {
+    // Fall through to best-effort line parsing below.
+  }
+
+  // Best-effort fallback: flat `key: value` only.
   const metadata = {};
   for (const line of match[1].split(/\r?\n/)) {
     if (!line.includes(":") || line.trimStart().startsWith("#")) continue;
@@ -181,13 +336,14 @@ export function listNotes({ directory = "", limit = 200 } = {}) {
   for (const child of children) {
     const childPath = path.join(root, child.name);
     if (!isVisible(settings, childPath)) continue;
-    const stat = fs.statSync(childPath);
+    // `child.isFile()` is already known from the dirent; stat once for size.
+    const stat = child.isFile() ? fs.statSync(childPath) : null;
     entries.push({
       path: relativePath(settings, childPath),
       name: child.name,
       type: child.isDirectory() ? "directory" : "file",
       size: child.isFile() ? stat.size : null,
-      modified: stat.mtime.toISOString().slice(0, 19),
+      modified: stat ? stat.mtime.toISOString().slice(0, 19) : null,
     });
     if (entries.length >= max) break;
   }
@@ -208,6 +364,10 @@ export function readNote({ filePath, path: notePath, maxChars = 40000 } = {}) {
   };
 }
 
+/**
+ * Search notes using the in-memory index instead of re-reading every file
+ * from disk on each call. Falls back gracefully if the index is empty.
+ */
 export function searchNotes({ query, directory = "", limit = 50 } = {}) {
   if (!String(query ?? "").trim()) throw new Error("query is required.");
 
@@ -218,16 +378,16 @@ export function searchNotes({ query, directory = "", limit = 50 } = {}) {
   }
 
   const max = Math.max(1, Math.min(limit, 200));
+  const index = getIndex(settings);
+  const needle = String(query).toLowerCase();
   const results = [];
-  for (const targetPath of walkTextFiles(settings, root)) {
-    let text = "";
-    try {
-      text = readText(settings, targetPath);
-    } catch {
-      continue;
-    }
 
-    if (!text.toLowerCase().includes(String(query).toLowerCase())) continue;
+  for (const [targetPath, text] of index) {
+    // Restrict to the requested sub-directory.
+    const rel = path.relative(root, targetPath);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) continue;
+
+    if (!text.toLowerCase().includes(needle)) continue;
     results.push({
       path: relativePath(settings, targetPath),
       title: path.parse(targetPath).name,
@@ -260,20 +420,18 @@ export function getNoteMetadata({ filePath, path: notePath } = {}) {
   };
 }
 
+/**
+ * Find backlinks using the in-memory index. Previously this read every file
+ * in the vault on each call; now it scans cached text only.
+ */
 export function findBacklinks({ target, limit = 100 } = {}) {
   const settings = loadSettings();
   const candidates = new Set([...noteIdCandidates(settings, target)].map((value) => value.toLowerCase()));
   const max = Math.max(1, Math.min(limit, 500));
+  const index = getIndex(settings);
   const backlinks = [];
 
-  for (const targetPath of walkTextFiles(settings)) {
-    let text = "";
-    try {
-      text = readText(settings, targetPath);
-    } catch {
-      continue;
-    }
-
+  for (const [targetPath, text] of index) {
     const matchedLinks = extractLinks(text).filter((link) => candidates.has(link.target.trim().toLowerCase()));
     if (!matchedLinks.length) continue;
 
@@ -348,7 +506,10 @@ export function createServer() {
 }
 
 export async function main() {
-  loadSettings();
+  const settings = loadSettings();
+  // Pre-build the text index asynchronously so the first search / backlink
+  // query is fast and the MCP event loop is not blocked during startup.
+  await rebuildIndex(settings);
   const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
