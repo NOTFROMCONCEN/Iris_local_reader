@@ -1,0 +1,19 @@
+{
+  "name": "obsidian-reader-mcp",
+  "version": "0.1.0",
+  "description": "Read-only MCP server for local Obsidian vaults.",
+  "type": "module",
+  "bin": {
+    "obsidian-reader-mcp": "./src/cli.mjs"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.21.1",
+    "zod": "^3.25.76"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -18,7 +18,57 @@
 - 默认单文件最大读取 `1 MB`
 - 不提供写入、删除、移动文件能力
 
-## 安装
+## npx 配置
+
+推荐用 STDIO + `npx` 启动。把 `F:\Path\To\Your\ObsidianVault` 改成你的 Obsidian vault 根目录。
+
+**命令**
+
+```text
+npx
+```
+
+**参数**
+
+```text
+--yes --package F:\A_Projects_pack_Classified\08_自编写MCP\Local_Reader obsidian-reader-mcp
+```
+
+**工作目录**
+
+```text
+F:\A_Projects_pack_Classified\08_自编写MCP\Local_Reader
+```
+
+如果你的 MCP 客户端支持环境变量，填：
+
+```text
+OBSIDIAN_VAULT_PATH=F:\Path\To\Your\ObsidianVault
+```
+
+如果界面没有环境变量输入框，可以改用 PowerShell 注入环境变量：
+
+**命令**
+
+```text
+pwsh
+```
+
+**参数**
+
+```text
+-NoProfile -Command "$env:OBSIDIAN_VAULT_PATH='F:\Path\To\Your\ObsidianVault'; npx --yes --package F:\A_Projects_pack_Classified\08_自编写MCP\Local_Reader obsidian-reader-mcp"
+```
+
+**工作目录**
+
+```text
+F:\A_Projects_pack_Classified\08_自编写MCP\Local_Reader
+```
+
+## 安装 Python 版
+
+Python 版仍然保留，适合你想直接用 Python 运行时使用。
 
 ```powershell
 cd F:\A_Projects_pack_Classified\08_自编写MCP\Local_Reader
@@ -34,7 +84,7 @@ py -m venv .venv
 .\.venv\Scripts\python.exe -m pytest
 ```
 
-## MCP 客户端配置
+## Python MCP 客户端配置
 
 把下面的 `F:\Path\To\Your\ObsidianVault` 改成你的 Obsidian vault 根目录。
 
@@ -70,4 +120,3 @@ $env:OBSIDIAN_VAULT_PATH = "F:\Path\To\Your\ObsidianVault"
 ```
 
 MCP 服务使用 stdio 通信，手动启动后看起来会等待输入，这是正常的。
-
