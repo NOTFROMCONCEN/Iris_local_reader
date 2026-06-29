@@ -1,0 +1,16 @@
+[project]
+name = "obsidian-reader-mcp"
+version = "0.1.0"
+description = "Read-only MCP server for local Obsidian vaults."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "mcp>=1.9.0",
+]
+
+[project.scripts]
+obsidian-reader-mcp = "obsidian_reader_mcp.server:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
