@@ -5,6 +5,40 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+function findProjectRoot(startDir) {
+  let current = startDir;
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (fs.existsSync(path.join(current, "package.json"))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return process.cwd();
+}
+
+const cliDir = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = findProjectRoot(cliDir);
+function getLogPaths() {
+  const paths = [
+    process.env.OBSIDIAN_READER_LOG_PATH,
+    path.join(process.cwd(), "logs", "kelivo-startup.log"),
+    path.join(projectRoot, "logs", "kelivo-startup.log"),
+  ].filter(Boolean);
+  return [...new Set(paths.map((item) => path.resolve(item)))];
+}
+
+function logStartup(message, details = undefined) {
+  const line = `[${new Date().toISOString()}] ${message}${details ? ` ${JSON.stringify(details)}` : ""}\n`;
+  for (const logPath of getLogPaths()) {
+    try {
+      fs.mkdirSync(path.dirname(logPath), { recursive: true });
+      fs.appendFileSync(logPath, line, "utf8");
+    } catch {
+      // Never let diagnostics break stdio startup.
+    }
+  }
+}
+
 function loadDotEnv(envPath) {
   if (!fs.existsSync(envPath)) return;
 
@@ -28,9 +62,8 @@ function loadDotEnv(envPath) {
   }
 }
 
-const cliDir = path.dirname(fileURLToPath(import.meta.url));
 loadDotEnv(path.resolve(process.cwd(), ".env"));
-loadDotEnv(path.resolve(cliDir, "..", ".env"));
+loadDotEnv(path.resolve(projectRoot, ".env"));
 
 function applyCliArgs(args) {
   for (let index = 0; index < args.length; index += 1) {
@@ -69,7 +102,20 @@ function applyCliArgs(args) {
 
 applyCliArgs(process.argv.slice(2));
 
+logStartup("starting", {
+  argv: process.argv.slice(2),
+  cwd: process.cwd(),
+  cliDir,
+  projectRoot,
+  node: process.version,
+  vault: process.env.OBSIDIAN_VAULT_PATH || null,
+});
+
 main().catch((error) => {
+  logStartup("failed", {
+    message: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack : null,
+  });
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

@@ -10,3 +10,4 @@ build/
 *.egg-info/
 .env
 npm-debug.log*
+logs/
