@@ -1,0 +1,12 @@
+.env
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+node_modules/
+tests/
+scripts/
+src/obsidian_reader_mcp/
+src/*.egg-info/
+*.tgz
+pyproject.toml

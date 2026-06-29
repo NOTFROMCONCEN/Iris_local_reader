@@ -8,7 +8,14 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 const client = new Client({ name: "npx-smoke", version: "0.0.0" });
 const transport = new StdioClientTransport({
   command: "npx",
-  args: ["--yes", "--package", repoRoot, "obsidian-reader-mcp"],
+  args: [
+    "--yes",
+    `--package=${path.join(repoRoot, "obsidian-reader-mcp-0.1.1.tgz")}`,
+    "--",
+    "obsidian-reader-mcp",
+    "--vault",
+    process.env.OBSIDIAN_VAULT_PATH ?? "F:\\缓存\\obsidian_datasql\\obsidian_datasql",
+  ],
   cwd: repoRoot,
   stderr: "pipe",
 });

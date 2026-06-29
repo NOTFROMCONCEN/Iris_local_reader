@@ -31,7 +31,7 @@ npx
 **参数**
 
 ```text
---yes --package F:\A_Projects_pack_Classified\08_自编写MCP\Local_Reader obsidian-reader-mcp
+--yes --package=F:\A_Projects_pack_Classified\08_自编写MCP\Local_Reader\obsidian-reader-mcp-0.1.1.tgz -- obsidian-reader-mcp --vault F:\Path\To\Your\ObsidianVault
 ```
 
 **工作目录**
@@ -40,7 +40,7 @@ npx
 F:\A_Projects_pack_Classified\08_自编写MCP\Local_Reader
 ```
 
-程序会自动读取工作目录下的 `.env`，所以可以直接在这里填 vault 路径：
+如果不用 tarball，而是直接用源码目录启动，可以省略 `--vault`，让程序自动读取工作目录下的 `.env`：
 
 ```text
 F:\A_Projects_pack_Classified\08_自编写MCP\Local_Reader\.env

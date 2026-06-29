@@ -291,7 +291,7 @@ export function findBacklinks({ target, limit = 100 } = {}) {
 export function createServer() {
   const server = new McpServer({
     name: "obsidian-reader",
-    version: "0.1.0",
+    version: "0.1.1",
   });
 
   server.tool(
